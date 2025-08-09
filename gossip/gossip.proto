@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package gossip;
+
+// Opzione per specificare il package Go
+option go_package = "/gossip";
+
+// Definiamo il servizio di Gossip
+service GossipService {
+  // Un metodo RPC. Il client invia il suo stato (GossipRequest)
+  // e il server risponde con il suo stato (GossipResponse).
+  rpc ShareState(GossipRequest) returns (GossipResponse) {}
+}
+
+// Enumerazione per lo stato di un nodo
+enum NodeStatus {
+  ALIVE = 0;
+  SUSPECT = 1;
+  DEAD = 2;
+}
+
+// La struttura dati che rappresenta lo stato di un singolo nodo
+message NodeState {
+  string addr = 1;
+  NodeStatus status = 2;
+  int64 heartbeat = 3;
+}
+
+// Il messaggio inviato dal client al server
+message GossipRequest {
+  // La mappa contiene la lista dei membri del mittente.
+  // La chiave è l'indirizzo del nodo.
+  map<string, NodeState> membership_list = 1;  // L'intera lista dei membri conosciuti dal mittente.
+}
+
+// Il messaggio di risposta del server
+message GossipResponse {
+  map<string, NodeState> membership_list = 1;
+}
