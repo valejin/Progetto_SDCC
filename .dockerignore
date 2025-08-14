@@ -1,0 +1,11 @@
+# Ignora i file di stato generati localmente
+stato_*.json
+
+# Ignora la cartella di Git
+.git
+
+# Cartelle specifiche dell'IDE GoLand / JetBrains
+.idea/
+
+# Ignora i file specifici dell'IDE
+.vscode/

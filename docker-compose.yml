@@ -1,0 +1,90 @@
+# Specifica la versione della sintassi di Docker Compose.
+version: '3.8'
+
+# La sezione 'services' è dove definiamo i nostri container (i tuoi nodi).
+services:
+  # --- Il nostro primo seed node ---
+  node-a:
+    # Nome del container per identificarlo facilmente in Docker Desktop o nei log.
+    container_name: node-a
+    # L'immagine da usare. 'gossip-service' è quella che abbiamo costruito prima.
+    image: gossip-service
+    # Il comando da eseguire all'avvio, che sovrascrive l'ENTRYPOINT del Dockerfile.
+    # Corrisponde a: go run . -port=8080
+
+    # Passiamo il nome del servizio come argomento al flag -addr
+    command: [ "-port=8080", "-addr=node-a" ]
+    # Mappiamo le porte per poterle (potenzialmente) raggiungere dall'esterno.
+    ports:
+      - "8080:8080"
+
+  # --- Il nostro secondo seed node ---
+  node-b:
+    container_name: node-b
+    image: gossip-service
+    # Corrisponde a: go run . -port=8081 -seeds=127.0.0.1:8080
+    # Usiamo sh -c per eseguire comandi multipli: prima sleep, poi l'app.
+    # SOSTITUIAMO L'ENTRYPOINT per inserire lo sleep di 6 secondi.
+    entrypoint: sh -c 'sleep 6 && exec /gossip-app "$$@"' --
+    # E passiamo il command normalmente
+    command: ["-port=8081", "-addr=node-b", "-seeds=node-a:8080"]
+    ports:
+      - "8081:8081"
+    # 'depends_on' assicura che Docker avvii 'node-a' prima di avviare 'node-b'.
+    depends_on:
+      - node-a
+
+  # --- Il nostro terzo nodo ---
+  node-c:
+    container_name: node-c
+    image: gossip-service
+    # Corrisponde a: go run . -port=8082 -seeds=127.0.0.1:8080,127.0.0.1:8081
+    # Questo nodo parte dopo 12 secondi.
+    entrypoint: sh -c 'sleep 12 && exec /gossip-app "$$@"' --
+    command: [ "-port=8082", "-addr=node-c", "-seeds=node-a:8080,node-b:8081" ]
+    ports:
+      - "8082:8082"
+    depends_on:
+      - node-a
+      - node-b
+
+  # --- Il nostro quarto nodo ---
+  node-d:
+    container_name: node-d
+    image: gossip-service
+    # Anche questo nodo parte dopo 12 secondi, insieme a C.
+    entrypoint: sh -c 'sleep 12 && exec /gossip-app "$$@"' --
+    command: [ "-port=8083", "-addr=node-d", "-seeds=node-a:8080,node-b:8081" ]
+    ports:
+      - "8083:8083"
+    depends_on:
+      - node-a
+      - node-b
+
+  # --- Il nostro quinto nodo ---
+  node-e:
+    container_name: node-e
+    image: gossip-service
+    # Questo nodo parte dopo 18 secondi.
+    entrypoint: sh -c 'sleep 18 && exec /gossip-app "$$@"' --
+    command: [ "-port=8084", "-addr=node-e", "-seeds=node-a:8080,node-b:8081" ]
+    ports:
+      # Usiamo una nuova porta, 8084
+      - "8084:8084"
+    depends_on:
+      - node-a
+      - node-b
+
+  # --- Il nostro sesto nodo ---
+  node-f:
+    container_name: node-f
+    image: gossip-service
+    # Anche questo nodo parte dopo 18 secondi, insieme a E.
+    entrypoint: sh -c 'sleep 18 && exec /gossip-app "$$@"' --
+    command: [ "-port=8085", "-addr=node-f", "-seeds=node-a:8080,node-b:8081" ]
+    ports:
+      # E una nuova porta, 8085
+      - "8085:8085"
+    depends_on:
+      - node-a
+      - node-b
