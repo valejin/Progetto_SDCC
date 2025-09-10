@@ -57,6 +57,7 @@ func (n *Node) bootstrap() bool {
 		n.mu.RLock()
 		selfState := n.MembershipList[n.SelfAddr]
 		req := &gossip.GossipRequest{
+			SenderAddr: n.SelfAddr,
 			MembershipList: map[string]*gossip.NodeState{
 				n.SelfAddr: selfState.NodeState,
 			},
@@ -79,7 +80,7 @@ func (n *Node) bootstrap() bool {
 		// SUCCESSO!
 		// Abbiamo contattato un seed e ricevuto una risposta valida.
 		log.Printf("✅ Connesso con successo al seed %s. Ricevuta lista membri. Bootstrap completato.", seedAddr)
-		n.mergeLists(resp.MembershipList)
+		n.mergeLists(resp.MembershipList, seedAddr)
 
 		return true // Usciamo immediatamente dalla funzione e dal ciclo. Missione compiuta.
 	}
@@ -131,7 +132,7 @@ func (n *Node) doGossip() {
 }
 
 // mergeLists fonde la lista remota (formato gRPC) con quella locale.
-func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState) {
+func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -157,34 +158,46 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState) {
 
 		localState, exists := n.MembershipList[addr]
 
-		// Un'informazione "ALIVE" da un nodo che pensavamo "DEAD" ha la priorità assoluta.
-		// Ignoriamo l'heartbeat in questo caso specifico, perché un riavvio resetta l'heartbeat.
-		isResurrected := exists && localState.Status == gossip.NodeStatus_DEAD && remoteState.Status == gossip.NodeStatus_ALIVE
-
-		// Aggiorniamo se:
-		// 1. Il nodo è resuscitato.
-		// 2. L'informazione remota ha un heartbeat maggiore.
-		// 3. Non conosciamo affatto il nodo.
-		if isResurrected || !exists || remoteState.Heartbeat > localState.Heartbeat {
-			// Evitiamo che un pettegolezzo "suspect" o "dead" più vecchio sovrascriva
-			// uno stato "alive" più recente ma con heartbeat inferiore (caso post-resurrezione).
-			if exists && !isResurrected && remoteState.Heartbeat < localState.Heartbeat {
-				continue
-			}
-
-			// Se il nodo che pensavamo morto non è vivo nella lista remota, ignoriamo.
-			if exists && localState.Status == gossip.NodeStatus_DEAD && !isResurrected {
-				continue
-			}
-
-			n.MembershipList[addr] = NodeStateWithTime{
-				NodeState:   remoteState,
-				LastUpdated: time.Now(),
-			}
-			if isResurrected {
-				log.Printf("🟢Nodo %s RESUSCITATO! Stato aggiornato.\n", addr)
+		// NUOVA LOGICA DI LOGGING
+		if !exists {
+			// Questo è un nodo completamente nuovo per noi.
+			if addr == sourceAddr {
+				log.Printf("🤝 Scoperto NUOVO nodo direttamente: %s si è presentato.", addr)
 			} else {
-				log.Printf("🚀Stato aggiornato per %s -> Status: %s, Heartbeat: %d\n", addr, remoteState.Status, remoteState.Heartbeat)
+				log.Printf("👂 Scoperto NUOVO nodo indirettamente: %s mi ha parlato di %s.", sourceAddr, addr)
+			}
+		}
+
+		// --- LOGICA DI MERGE ---
+
+		// Se non esiste, lo aggiungiamo sempre.
+		if !exists {
+			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
+			continue // Passa al prossimo
+		}
+
+		// Se esiste, la logica è più complessa:
+		// REGOLA 1: Se lo stato locale è DEAD, ignora tutto tranne un heartbeat più alto.
+		if localState.Status == gossip.NodeStatus_DEAD {
+			// L'unico modo per uscire da DEAD è una vera resurrezione che implica uno stato ALIVE.
+			// Seguo la logica delle lapidi per i riavvii, e qui ignoro qualsiasi informazione che non abbia un heartbeat maggiore.
+			// Questo previene la "falsa resurrezione".
+			if remoteState.Heartbeat <= localState.Heartbeat {
+				continue
+			}
+		}
+
+		// REGOLA 2: L'heartbeat più alto vince sempre (tranne per il caso DEAD gestito sopra).
+		if remoteState.Heartbeat > localState.Heartbeat {
+			// Un caso speciale: se un nodo torna ALIVE dopo essere stato SUSPECT, lo accettiamo.
+			isRevivedFromSuspect := localState.Status == gossip.NodeStatus_SUSPECT && remoteState.Status == gossip.NodeStatus_ALIVE
+
+			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
+
+			if isRevivedFromSuspect {
+				log.Printf("✅ Nodo %s è tornato ALIVE da SUSPECT. (da %s)", addr, sourceAddr)
+			} else {
+				log.Printf("🚀 Stato aggiornato per %s -> Status: %s, Heartbeat: %d (da %s)", addr, remoteState.Status, remoteState.Heartbeat, sourceAddr)
 			}
 		}
 	}

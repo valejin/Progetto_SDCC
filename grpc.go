@@ -24,7 +24,7 @@ type gossipServer struct {
 // ShareState è l'implementazione del metodo RPC definito nel .proto.
 func (s *gossipServer) ShareState(ctx context.Context, req *gossip.GossipRequest) (*gossip.GossipResponse, error) {
 	// Riceviamo una lista remota, la mergiamo con la nostra
-	s.node.mergeLists(req.MembershipList)
+	s.node.mergeLists(req.MembershipList, req.SenderAddr)
 
 	// Prepariamo la risposta con la nostra lista aggiornata
 	s.node.mu.RLock()
@@ -88,7 +88,12 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 	}
 	n.mu.RUnlock()
 
-	req := &gossip.GossipRequest{MembershipList: requestList}
+	//req := &gossip.GossipRequest{MembershipList: requestList}
+	// Popoliamo il campo SenderAddr con il nostro indirizzo.
+	req := &gossip.GossipRequest{
+		SenderAddr:     n.SelfAddr, // Indirizzo del mittente
+		MembershipList: requestList,
+	}
 
 	// Esegui la chiamata RPC
 	resp, err := client.ShareState(context.Background(), req)
@@ -99,5 +104,5 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 	}
 
 	// Se la chiamata ha successo, mergiamo la lista ricevuta in risposta
-	n.mergeLists(resp.MembershipList)
+	n.mergeLists(resp.MembershipList, peerAddr)
 }

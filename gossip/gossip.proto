@@ -28,9 +28,11 @@ message NodeState {
 
 // Il messaggio inviato dal client al server
 message GossipRequest {
+  // L'indirizzo del nodo che invia la richiesta.
+  string sender_addr = 1;
   // La mappa contiene la lista dei membri del mittente.
   // La chiave è l'indirizzo del nodo.
-  map<string, NodeState> membership_list = 1;  // L'intera lista dei membri conosciuti dal mittente.
+  map<string, NodeState> membership_list = 2;  // L'intera lista dei membri conosciuti dal mittente.
 }
 
 // Il messaggio di risposta del server
