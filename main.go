@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -28,20 +29,22 @@ func main() {
 	// Avvia il ciclo di gossip in un'altra goroutine
 	go StartGossipLoop(node)
 
-	// --- LOGICA DI ARRESTO GRAZIOSO ---
-	// Creiamo un canale per ricevere il segnale di sistema
-	shutdown := make(chan os.Signal, 1)
-	// Notifichiamo al canale quando riceviamo SIGINT (Ctrl+C) o SIGTERM
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
-	// Blocchiamo l'esecuzione qui finché non riceviamo un segnale
-	<-shutdown
+	// Logica di arresto grazioso
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, syscall.SIGINT, syscall.SIGTERM)
+	<-shutdownChan
+
+	log.Println("Ricevuto segnale di arresto. Avvio del graceful shutdown...")
+
+	node.Shutdown()
 
 	// --- OPERAZIONI DI CLEANUP ---
-	log.Println("Arresto del nodo...")
+
 	// Salva l'ultimo stato su file.
 	log.Println("💾Salvataggio dello stato finale su file...")
 	node.saveStateToFile() // Chiamiamo la funzione di salvataggio
 
+	time.Sleep(1 * time.Second)
 	log.Println("🔴Arresto del nodo completato.")
 
 }

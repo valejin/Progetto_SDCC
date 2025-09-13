@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,7 +23,7 @@ const (
 	cleanupTimeout   = 10 * time.Second
 	snapshotInterval = 15 * time.Second // Salva lo stato su disco ogni 15 secondi
 	tombstoneTimeout = 60 * time.Second // Dopo quanto una lapide può essere rimossa
-	kRandomPeers     = 1                // Numero di peer casuali da contattare per il gossip
+	kRandomPeers     = 2                // Numero di peer casuali da contattare per il gossip
 )
 
 // --- FUNZIONE DI BOOTSTRAP: tenta di connettersi ai seed. ---
@@ -136,6 +137,8 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	var stateChanged bool
+
 	// Se un'informazione è nuova o più aggiornata (con un heartbeat più alto), la aggiorniamo.
 	for addr, remoteState := range remoteList {
 
@@ -158,9 +161,9 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 
 		localState, exists := n.MembershipList[addr]
 
-		// NUOVA LOGICA DI LOGGING
+		// LOGICA DI LOGGING
 		if !exists {
-			// Questo è un nodo completamente nuovo per noi.
+			// Nuovo nodo scoperto
 			if addr == sourceAddr {
 				log.Printf("🤝 Scoperto NUOVO nodo direttamente: %s si è presentato.", addr)
 			} else {
@@ -170,36 +173,54 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 
 		// --- LOGICA DI MERGE ---
 
-		// Se non esiste, lo aggiungiamo sempre.
-		if !exists {
-			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
-			continue // Passa al prossimo
-		}
+		isResurrected := exists && localState.Status == gossip.NodeStatus_DEAD && remoteState.Status == gossip.NodeStatus_ALIVE
 
-		// Se esiste, la logica è più complessa:
-		// REGOLA 1: Se lo stato locale è DEAD, ignora tutto tranne un heartbeat più alto.
-		if localState.Status == gossip.NodeStatus_DEAD {
-			// L'unico modo per uscire da DEAD è una vera resurrezione che implica uno stato ALIVE.
-			// Seguo la logica delle lapidi per i riavvii, e qui ignoro qualsiasi informazione che non abbia un heartbeat maggiore.
-			// Questo previene la "falsa resurrezione".
-			if remoteState.Heartbeat <= localState.Heartbeat {
+		// La condizione principale di merge
+		if isResurrected || !exists || remoteState.Heartbeat > localState.Heartbeat {
+			if exists && !isResurrected && remoteState.Heartbeat < localState.Heartbeat {
 				continue
 			}
-		}
+			if exists && localState.Status == gossip.NodeStatus_DEAD && !isResurrected {
+				continue
+			}
 
-		// REGOLA 2: L'heartbeat più alto vince sempre (tranne per il caso DEAD gestito sopra).
-		if remoteState.Heartbeat > localState.Heartbeat {
-			// Un caso speciale: se un nodo torna ALIVE dopo essere stato SUSPECT, lo accettiamo.
-			isRevivedFromSuspect := localState.Status == gossip.NodeStatus_SUSPECT && remoteState.Status == gossip.NodeStatus_ALIVE
+			// --- LOGICA DI LOGGING PER AUTO-DICHIARAZIONE DI MORTE ---
+			// Determiniamo se questo è un cambiamento significativo
+			if !exists || isResurrected || localState.Status != remoteState.Status {
+				stateChanged = true
+			}
+			// Controlliamo se stiamo ricevendo un'auto-dichiarazione di morte.
+			// Questo accade se il nodo era ALIVE e ora riceviamo DEAD con un heartbeat maggiore,
+			isSelfDeclaredDead := exists &&
+				(localState.Status == gossip.NodeStatus_ALIVE || localState.Status == gossip.NodeStatus_SUSPECT) &&
+				remoteState.Status == gossip.NodeStatus_DEAD &&
+				addr == sourceAddr
 
-			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
+			// Aggiorniamo lo stato nella nostra lista
+			n.MembershipList[addr] = NodeStateWithTime{
+				NodeState:   remoteState,
+				LastUpdated: time.Now(),
+			}
 
-			if isRevivedFromSuspect {
-				log.Printf("✅ Nodo %s è tornato ALIVE da SUSPECT. (da %s)", addr, sourceAddr)
+			// Ora stampiamo il log appropriato
+			if isSelfDeclaredDead {
+				// Messaggio specifico per l'uscita volontaria
+				log.Printf("👋 Ricevuto annuncio di uscita da %s. Il nodo si è auto-dichiarato DEAD. Lo marco come tale.", addr)
+			} else if isResurrected {
+				log.Printf("✅ Nodo %s RESUSCITATO! Stato aggiornato.", addr)
+			} else if !exists {
+				// Il log di scoperta è già stato stampato sopra, quindi non facciamo nulla.
 			} else {
+				// Messaggio di log generico per altri aggiornamenti
 				log.Printf("🚀 Stato aggiornato per %s -> Status: %s, Heartbeat: %d (da %s)", addr, remoteState.Status, remoteState.Heartbeat, sourceAddr)
 			}
 		}
+	}
+
+	if stateChanged {
+		// La chiamata al salvataggio su file
+		go n.saveStateToFile()
+
 	}
 }
 
@@ -225,12 +246,16 @@ func (n *Node) markAsSuspect(addr string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if state, ok := n.MembershipList[addr]; ok && state.Status != gossip.NodeStatus_DEAD {
+	state, ok := n.MembershipList[addr]
+	// Controlla se il nodo esiste e se il suo stato è ancora ALIVE.
+	if ok && state.Status == gossip.NodeStatus_ALIVE {
 		state.Status = gossip.NodeStatus_SUSPECT
 		state.LastUpdated = time.Now()
 		n.MembershipList[addr] = state
+		// Stampa il log SOLO se abbiamo effettivamente cambiato lo stato.
 		log.Printf("❗ Nodo %s marcato come SUSPECT\n", addr)
 	}
+
 }
 
 func (n *Node) saveStateToFile() {
@@ -326,5 +351,63 @@ func (n *Node) checkFailures() {
 	if stateChanged {
 		log.Println("💾Lo stato è cambiato, salvo su file...")
 		n.saveStateToFile()
+	}
+}
+
+func (n *Node) Shutdown() {
+	log.Println("📢 Avvio della procedura di shutdown... Annuncio la mia uscita come 'DEAD'.")
+
+	// Lock di scrittura per modificare lo stato.
+	n.mu.Lock()
+
+	// Si auto-dichiara DEAD e incrementa l'heartbeat al massimo possibile
+	// per garantire che questa informazione abbia la priorità assoluta e si propaghi.
+	selfState := n.MembershipList[n.SelfAddr]
+	selfState.Status = gossip.NodeStatus_DEAD
+	selfState.Heartbeat++ // Un semplice incremento è sufficiente per vincere la race condition
+	selfState.LastUpdated = time.Now()
+	n.MembershipList[n.SelfAddr] = selfState
+
+	n.mu.Unlock() // Rilascia il lock prima delle chiamate di rete
+
+	// Seleziona alcuni peer a cui inviare il "messaggio di addio".
+	// Ne scegliamo di più per aumentare la probabilità di diffusione.
+	peers := n.selectRandomPeers(kRandomPeers * 2)
+	if len(peers) == 0 {
+		// Se siamo l'ultimo nodo, non c'è nessuno a cui dirlo.
+		log.Println("Nessun altro peer a cui notificare l'uscita.")
+		return
+	}
+
+	// Invia il messaggio di addio in parallelo.
+	var wg sync.WaitGroup
+	for _, peer := range peers {
+		wg.Add(1)
+		go func(peerAddr string) {
+			defer wg.Done()
+			// Chiama sendGossipRPC, che invierà la propria lista di membri
+			// contenente l'auto-dichiarazione di morte.
+			n.sendGossipRPC(peerAddr)
+		}(peer)
+	}
+
+	// Attendiamo un breve periodo per dare tempo alle goroutine di inviare il messaggio.
+	waitTimeout(&wg, 1*time.Second)
+
+	log.Println("Annuncio di uscita inviato. Termino.")
+}
+
+// waitTimeout attende che il WaitGroup sia completato o che scada il timeout.
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		// Completato
+	case <-time.After(timeout):
+		// Timeout
 	}
 }

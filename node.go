@@ -16,7 +16,6 @@ type NodeStateWithTime struct {
 // Node rappresenta la nostra istanza del servizio.
 type Node struct {
 	SelfAddr string
-	// La lista dei membri ora usa la nostra struct estesa (include il nodo stesso).
 	// La chiave è l'indirizzo del nodo, il valore è lo stato del nodo con timestamp.
 	MembershipList map[string]NodeStateWithTime
 	// Mappa per le lapidi. [addr] -> tempo di rimozione

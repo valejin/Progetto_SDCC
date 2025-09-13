@@ -88,7 +88,6 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 	}
 	n.mu.RUnlock()
 
-	//req := &gossip.GossipRequest{MembershipList: requestList}
 	// Popoliamo il campo SenderAddr con il nostro indirizzo.
 	req := &gossip.GossipRequest{
 		SenderAddr:     n.SelfAddr, // Indirizzo del mittente
