@@ -150,6 +150,7 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 			if remoteState.Status == gossip.NodeStatus_ALIVE {
 				log.Printf("🟢Nodo %s è tornato vivo, rimuovo la sua lapide.", addr)
 				delete(n.Tombstones, addr)
+				stateChanged = true
 				// Ora procediamo con la normale logica di merge per questo nodo.
 			} else {
 				// Altrimenti, se non è ALIVE, è solo un pettegolezzo vecchio su un nodo
@@ -168,56 +169,46 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 			} else {
 				log.Printf("👂 Scoperto NUOVO nodo indirettamente: %s mi ha parlato di %s.", sourceAddr, addr)
 			}
+			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
+			stateChanged = true
+			continue // Passa al prossimo nodo
 		}
 
 		// --- LOGICA DI MERGE ---
 
-		isResurrected := exists && localState.Status == gossip.NodeStatus_DEAD && remoteState.Status == gossip.NodeStatus_ALIVE
+		// --- 3. Gestione Nodi Esistenti (LA PARTE CRITICA) ---
 
-		// --- NUOVO CONTROLLO DI SICUREZZA ---
-		// Dovuto alla terminazione contemporanea di più nodi in docker.
-		// Un nodo non può resuscitare se stesso basandosi su un pettegolezzo obsoleto.
-		// La logica di resurrezione si applica solo agli ALTRI nodi.
-		if addr == n.SelfAddr {
-			isResurrected = false
-		}
-
-		// La condizione principale di merge
-		if isResurrected || !exists || remoteState.Heartbeat > localState.Heartbeat {
-			if exists && !isResurrected && remoteState.Heartbeat < localState.Heartbeat {
-				continue
-			}
-			if exists && localState.Status == gossip.NodeStatus_DEAD && !isResurrected {
-				continue
-			}
-
-			// --- LOGICA PER AUTO-DICHIARAZIONE DI MORTE ---
-			// Determiniamo se questo è un cambiamento significativo
-			if !exists || isResurrected || localState.Status != remoteState.Status {
+		// REGOLA DI FERRO: Protezione dello stato DEAD
+		// Se il nostro stato locale è DEAD, NESSUN pettegolezzo può resuscitarlo,
+		// tranne la logica delle lapidi (già gestita sopra).
+		// Accettiamo solo un heartbeat più alto per lo stato DEAD, ma non un cambio di stato.
+		if localState.Status == gossip.NodeStatus_DEAD {
+			if remoteState.Status == gossip.NodeStatus_DEAD && remoteState.Heartbeat > localState.Heartbeat {
+				// Aggiorniamo solo se è un'informazione DEAD più recente
+				n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
 				stateChanged = true
 			}
-			// Controlliamo se stiamo ricevendo un'auto-dichiarazione di morte.
-			// Questo accade se il nodo era ALIVE e ora riceviamo DEAD con un heartbeat maggiore,
-			isSelfDeclaredDead := exists &&
-				(localState.Status == gossip.NodeStatus_ALIVE || localState.Status == gossip.NodeStatus_SUSPECT) &&
+			continue // Ignora qualsiasi altra informazione (specialmente ALIVE o SUSPECT)
+		}
+
+		// Se arriviamo qui, lo stato locale NON è DEAD.
+
+		// REGOLA GENERALE: l'heartbeat più alto vince.
+		if remoteState.Heartbeat > localState.Heartbeat {
+			isSelfDeclaredDead := (localState.Status == gossip.NodeStatus_ALIVE || localState.Status == gossip.NodeStatus_SUSPECT) &&
 				remoteState.Status == gossip.NodeStatus_DEAD &&
 				addr == sourceAddr
 
-			// Aggiorniamo lo stato nella nostra lista
-			n.MembershipList[addr] = NodeStateWithTime{
-				NodeState:   remoteState,
-				LastUpdated: time.Now(),
+			// CONTROLLO PER IL SALVATAGGIO: Lo stato è cambiato?
+			if localState.Status != remoteState.Status {
+				stateChanged = true
 			}
 
+			n.MembershipList[addr] = NodeStateWithTime{NodeState: remoteState, LastUpdated: time.Now()}
+
 			if isSelfDeclaredDead {
-				// Messaggio specifico per l'uscita volontaria
 				log.Printf("👋 Ricevuto annuncio di uscita da %s. Il nodo si è auto-dichiarato DEAD. Lo marco come tale.", addr)
-			} else if isResurrected {
-				log.Printf("✅ Nodo %s RESUSCITATO! Stato aggiornato.", addr)
-			} else if !exists {
-				// Il log di scoperta è già stato stampato sopra, quindi non facciamo nulla.
 			} else {
-				// Messaggio di log generico per altri aggiornamenti
 				log.Printf("🚀 Stato aggiornato per %s -> Status: %s, Heartbeat: %d (da %s)", addr, remoteState.Status, remoteState.Heartbeat, sourceAddr)
 			}
 		}
