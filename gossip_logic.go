@@ -174,6 +174,14 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 
 		isResurrected := exists && localState.Status == gossip.NodeStatus_DEAD && remoteState.Status == gossip.NodeStatus_ALIVE
 
+		// --- NUOVO CONTROLLO DI SICUREZZA ---
+		// Dovuto alla terminazione contemporanea di più nodi in docker.
+		// Un nodo non può resuscitare se stesso basandosi su un pettegolezzo obsoleto.
+		// La logica di resurrezione si applica solo agli ALTRI nodi.
+		if addr == n.SelfAddr {
+			isResurrected = false
+		}
+
 		// La condizione principale di merge
 		if isResurrected || !exists || remoteState.Heartbeat > localState.Heartbeat {
 			if exists && !isResurrected && remoteState.Heartbeat < localState.Heartbeat {
