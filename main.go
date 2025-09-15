@@ -23,13 +23,13 @@ func main() {
 
 	node := NewNode(*addr, *port, seeds)
 
-	// Avvia il server gRPC in una goroutine
+	// Avvia il server gRPC in una goroutine.
 	go StartGRPCServer(node, *port)
 
-	// Avvia il ciclo di gossip in un'altra goroutine
+	// Avvia il ciclo di gossip in un'altra goroutine.
 	go StartGossipLoop(node)
 
-	// Logica di arresto grazioso
+	// Logica di arresto grazioso. Aspetta un segnale di interruzione (Ctrl+C).
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, syscall.SIGINT, syscall.SIGTERM)
 	<-shutdownChan

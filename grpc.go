@@ -80,7 +80,7 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 	// Crea un client stub, un oggetto che ci permette di chiamare le funzioni remote come se fossero locali.
 	client := gossip.NewGossipServiceClient(conn)
 
-	// Prepara la richiesta con la nostra lista di membri
+	// Prepara la richiesta con la nostra lista di membri.
 	n.mu.RLock()
 	requestList := make(map[string]*gossip.NodeState)
 	for addr, state := range n.MembershipList {
@@ -94,7 +94,7 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 		MembershipList: requestList,
 	}
 
-	// Esegui la chiamata RPC
+	// Esegui la chiamata RPC.
 	resp, err := client.ShareState(context.Background(), req)
 	if err != nil {
 		log.Printf("❌ Errore nella chiamata RPC a %s: %v. Marco come Suspect.", peerAddr, err)
@@ -102,6 +102,6 @@ func (n *Node) sendGossipRPC(peerAddr string) {
 		return
 	}
 
-	// Se la chiamata ha successo, mergiamo la lista ricevuta in risposta
+	// Se la chiamata ha successo, mergiamo la lista ricevuta in risposta.
 	n.mergeLists(resp.MembershipList, peerAddr)
 }

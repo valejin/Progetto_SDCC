@@ -70,7 +70,7 @@ func (n *Node) bootstrap() bool {
 		resp, err := client.ShareState(rpcCtx, req)
 		rpcCancel()
 
-		// Chiudiamo la connessione, non ci serve più.
+		// Chiudiamo la connessione.
 		conn.Close()
 
 		if err != nil {
@@ -78,12 +78,12 @@ func (n *Node) bootstrap() bool {
 			continue // Se la chiamata RPC fallisce, passa al prossimo seed.
 		}
 
-		// SUCCESSO!
+		// SUCCESSO
 		// Abbiamo contattato un seed e ricevuto una risposta valida.
 		log.Printf("✅ Connesso con successo al seed %s. Ricevuta lista membri. Bootstrap completato.", seedAddr)
 		n.mergeLists(resp.MembershipList, seedAddr)
 
-		return true // Usciamo immediatamente dalla funzione e dal ciclo. Missione compiuta.
+		return true // Usciamo immediatamente dalla funzione e dal ciclo.
 	}
 
 	// Se il ciclo 'for' finisce, significa che abbiamo provato tutti i seed senza successo.
@@ -103,7 +103,6 @@ func StartGossipLoop(node *Node) {
 	defer failureTicker.Stop()
 	defer snapshotTicker.Stop()
 
-	//log.Println("Avvio del ciclo di gossip e monitoraggio...")
 	for {
 		select {
 		case <-gossipTicker.C:
@@ -154,7 +153,7 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 				// Ora procediamo con la normale logica di merge per questo nodo.
 			} else {
 				// Altrimenti, se non è ALIVE, è solo un pettegolezzo vecchio su un nodo
-				// che abbiamo deciso di dimenticare. Ignoriamolo.
+				// che abbiamo deciso di dimenticare.
 				continue
 			}
 		}
@@ -184,7 +183,7 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 				continue
 			}
 
-			// --- LOGICA DI LOGGING PER AUTO-DICHIARAZIONE DI MORTE ---
+			// --- LOGICA PER AUTO-DICHIARAZIONE DI MORTE ---
 			// Determiniamo se questo è un cambiamento significativo
 			if !exists || isResurrected || localState.Status != remoteState.Status {
 				stateChanged = true
@@ -202,7 +201,6 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 				LastUpdated: time.Now(),
 			}
 
-			// Ora stampiamo il log appropriato
 			if isSelfDeclaredDead {
 				// Messaggio specifico per l'uscita volontaria
 				log.Printf("👋 Ricevuto annuncio di uscita da %s. Il nodo si è auto-dichiarato DEAD. Lo marco come tale.", addr)
@@ -302,7 +300,6 @@ func (n *Node) saveStateToFile() {
 // checkFailures controlla i nodi e li marca come Dead o li rimuove.
 func (n *Node) checkFailures() {
 	n.mu.Lock()
-	//defer n.mu.Unlock()
 
 	// Flag per sapere se c'è stato un cambiamento nella lista dei membri
 	stateChanged := false
