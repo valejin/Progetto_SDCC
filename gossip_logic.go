@@ -175,10 +175,8 @@ func (n *Node) mergeLists(remoteList map[string]*gossip.NodeState, sourceAddr st
 		}
 
 		// --- LOGICA DI MERGE ---
+		// --- Gestione Nodi Esistenti (LA PARTE CRITICA) ---
 
-		// --- 3. Gestione Nodi Esistenti (LA PARTE CRITICA) ---
-
-		// REGOLA DI FERRO: Protezione dello stato DEAD
 		// Se il nostro stato locale è DEAD, NESSUN pettegolezzo può resuscitarlo,
 		// tranne la logica delle lapidi (già gestita sopra).
 		// Accettiamo solo un heartbeat più alto per lo stato DEAD, ma non un cambio di stato.
